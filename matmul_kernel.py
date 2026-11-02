@@ -2,10 +2,11 @@ import torch
 import triton
 import triton.language as tl
 import math
+import pdb
 
 @triton.jit
 def matrix_multiplication_kernel(
-    a, b, c, M, N, K, stride_am, stride_an, stride_bn, stride_bk, stride_cm, stride_ck, BLOCK_SIZE: tl.constexpr
+    a, b, c, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, stride_am, stride_an, stride_bn, stride_bk, stride_cm, stride_ck, BLOCK_SIZE: tl.constexpr
 ):
     a_ptr = a.to(tl.pointer_type(tl.float32))
     b_ptr = b.to(tl.pointer_type(tl.float32))
@@ -30,25 +31,51 @@ def matrix_multiplication_kernel(
         a_block_offsets = a_ptr + (horizontal_a + vertical_a)
 
         horizontal_b = off_h + full_h*pid_k*BLOCK_SIZE
-        vertical_b = (off_v + full_v*block*BLOCK_SIZE)*N
+        vertical_b = (off_v + full_v*block*BLOCK_SIZE)*K
 
         mask_b = (horizontal_b < K) & (vertical_b < N*K)
         b_block_offsets = b_ptr + (horizontal_b + vertical_b)
 
+
         a_mult = tl.load(a_block_offsets,mask=mask_a)
         b_mult = tl.load(b_block_offsets,mask=mask_b)
-        c_mult = tl.dot(a_mult,b_mult)
 
+        
+
+        c_mult = tl.dot(a_mult,b_mult)
+        
         c_accum += c_mult
 
+    horizontal_c = tl.arange(0,M)[:,None]
+    vertical_c = tl.arange(0,K)[None,:]
+
+    c_block_offsets = c_ptr + (horizontal_c + vertical_c)
+
+    # the entire c block
+    entire_c_block = tl.load(c_block_offsets)
+
+    pdb.set_trace()
+
+    ###
     horizontal_c = off_h + full_h*pid_k*BLOCK_SIZE
     vertical_c = (off_v + full_v*pid_m*BLOCK_SIZE)*K
     
     mask_c = (horizontal_c < K) & (vertical_c < M*K)
     c_block_offsets = c_ptr + (horizontal_c + vertical_c)
-    
+
     tl.store(c_block_offsets, c_accum, mask=mask_c)
-    
+
+    ### 
+
+    horizontal_c = tl.arange(0,M)[:,None]
+    vertical_c = tl.arange(0,K)[None,:]
+
+    c_block_offsets = c_ptr + (horizontal_c + vertical_c)
+
+    # the entire c block
+    entire_c_block = tl.load(c_block_offsets)
+
+    pdb.set_trace()
 
 # a, b, c are tensors on the GPU
 def solve(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, M: int, N: int, K: int):
@@ -63,19 +90,24 @@ def solve(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, M: int, N: int, K: 
     return c
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-size = 128
 
-x = torch.rand(size, size, device=DEVICE)
-y = torch.rand(size, size, device=DEVICE)
+m,n,k = 32,16,32
 
+x = torch.full((m, n), fill_value=1,device=DEVICE,dtype=torch.float32)
+y = torch.full((n, k), fill_value=2, device=DEVICE,dtype=torch.float32)
+
+print("X")
+print(x)
+print("Y")
+print(y)
 # FIX 1 & 2: Spell 'zeros' correctly and place it on the correct DEVICE
-z2 = torch.zeros(size, size, device=DEVICE) 
+z2 = torch.zeros(m, k, device=DEVICE,dtype=torch.float32) 
 
 # PyTorch Native Reference
 z = x @ y
 import numpy
 # Triton Execution
-solve(x, y, z2, size, size, size)
+solve(x, y, z2, m, n, k)
 
 # 4. Correct way to verify the results
 print("PyTorch result sample:\n",z)
