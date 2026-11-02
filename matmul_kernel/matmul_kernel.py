@@ -56,6 +56,46 @@ def matrix_multiplication_kernel(
 
     ### 
 
+@triton.jit
+def matmul_kernel_cleaner( # same thing but with wrappers not reinvented wheel
+    a_ptr, b_ptr, c_ptr, 
+    M, N, K, 
+    stride_am, stride_an, 
+    stride_bn, stride_bk, 
+    stride_cm, stride_ck, 
+    BLOCK_SIZE: tl.constexpr
+):
+    pid_m = tl.program_id(0)
+    pid_k = tl.program_id(1)
+
+    a_block_ptr = tl.make_block_ptr(
+        base=a_ptr, shape=(M, N), strides=(stride_am, stride_an),
+        offsets=(pid_m * BLOCK_SIZE, 0), 
+        block_shape=(BLOCK_SIZE, BLOCK_SIZE), order=(1, 0)
+    )
+    b_block_ptr = tl.make_block_ptr(
+        base=b_ptr, shape=(N, K), strides=(stride_bn, stride_bk),
+        offsets=(0, pid_k * BLOCK_SIZE), 
+        block_shape=(BLOCK_SIZE, BLOCK_SIZE), order=(1, 0)
+    )
+
+    c_accum = tl.zeros((BLOCK_SIZE, BLOCK_SIZE), dtype=tl.float32)
+
+    for _ in range(0, tl.cdiv(N, BLOCK_SIZE)):
+        a_block = tl.load(a_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        b_block = tl.load(b_block_ptr, boundary_check=(0, 1), padding_option="zero")
+
+        c_accum += tl.dot(a_block, b_block)
+
+        a_block_ptr = tl.advance(a_block_ptr, (0, BLOCK_SIZE)) # make it go sideways
+        b_block_ptr = tl.advance(b_block_ptr, (BLOCK_SIZE, 0)) # make it go down
+
+    c_block_ptr = tl.make_block_ptr(
+        base=c_ptr, shape=(M, K), strides=(stride_cm, stride_ck),
+        offsets=(pid_m * BLOCK_SIZE, pid_k * BLOCK_SIZE), 
+        block_shape=(BLOCK_SIZE, BLOCK_SIZE), order=(1, 0)
+    )
+    tl.store(c_block_ptr, c_accum, boundary_check=(0, 1))
 
 # a, b, c are tensors on the GPU
 def solve(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor, M: int, N: int, K: int):
