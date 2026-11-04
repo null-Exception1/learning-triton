@@ -5,6 +5,7 @@ import triton.language as tl
 @triton.jit
 def layernorm_kernel( # yea i went for a row by row approach ik
     input_ptr, 
+    output_ptr,
     weight_ptr, 
     bias_ptr, 
     mean_ptr, 
@@ -16,12 +17,13 @@ def layernorm_kernel( # yea i went for a row by row approach ik
 ):
     row_idx = tl.program_id(0)
 
-    
+
     if row_idx >= N:
         return
 
     row_start_ptr = input_ptr + row_idx * C
-
+    row_start_output_ptr = output_ptr + row_idx * C
+    
     cols = tl.arange(0, BLOCK_SIZE)
     mask = cols < C
 
@@ -40,7 +42,7 @@ def layernorm_kernel( # yea i went for a row by row approach ik
     normalized_x = x_centered / tl.sqrt(variance + eps)
     output_x = normalized_x * w + b
 
-    tl.store(row_start_ptr + cols, output_x, mask=mask)
+    tl.store(row_start_output_ptr + cols, output_x, mask=mask)
 
 def solve(
     input: torch.Tensor,
@@ -60,6 +62,7 @@ def solve(
 
     layernorm_kernel[grid](
         input, 
+        output,
         weight, 
         bias, 
         mean, 
@@ -70,4 +73,4 @@ def solve(
         BLOCK_SIZE=BLOCK_SIZE
     )
 
-    return input, mean, variance
+    #return input, mean, variance
