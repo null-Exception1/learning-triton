@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 
 @triton.jit
-def layernorm_kernel(
+def layernorm_kernel( # yea i went for a row by row approach ik
     input_ptr, 
     weight_ptr, 
     bias_ptr, 
