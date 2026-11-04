@@ -15,6 +15,8 @@ def layernorm_kernel( # yea i went for a row by row approach ik
     BLOCK_SIZE: tl.constexpr
 ):
     row_idx = tl.program_id(0)
+
+    
     if row_idx >= N:
         return
 
